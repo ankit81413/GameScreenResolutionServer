@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="refresh" content="5" />
+  <title>GameScreen Resolution Server Status</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { margin-bottom: 8px; }
+    .meta { color: #555; margin-bottom: 20px; }
+    .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; min-width: 160px; }
+    .label { color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .value { font-size: 22px; margin-top: 4px; font-weight: 700; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f7f7f7; }
+    code { background: #f2f2f2; padding: 2px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>GameScreen Resolution Server</h1>
+  <div class="meta">
+    Status page refreshes every 5s. As of: <strong>{{AS_OF}}</strong>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Current Activity</div><div class="value">{{CURRENT_ACTIVITY}}</div></div>
+    <div class="card"><div class="label">Active Jobs</div><div class="value">{{ACTIVE_COUNT}}</div></div>
+    <div class="card"><div class="label">Success (recent)</div><div class="value">{{SUCCESS_COUNT}}</div></div>
+    <div class="card"><div class="label">Failed (recent)</div><div class="value">{{FAILED_COUNT}}</div></div>
+    <div class="card"><div class="label">Uptime</div><div class="value">{{UPTIME}}</div></div>
+  </div>
+
+  <h2>Active Jobs</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Job ID</th>
+        <th>Wallpaper ID</th>
+        <th>Started</th>
+        <th>Elapsed</th>
+        <th>Source Path</th>
+      </tr>
+    </thead>
+    <tbody>{{ACTIVE_ROWS}}</tbody>
+  </table>
+
+  <h2>Recent Jobs (Latest 20)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Job ID</th>
+        <th>Wallpaper ID</th>
+        <th>Status</th>
+        <th>Duration</th>
+        <th>Finished</th>
+        <th>Error</th>
+      </tr>
+    </thead>
+    <tbody>{{RECENT_ROWS}}</tbody>
+  </table>
+
+  <p>API endpoints: <code>GET /health</code>, <code>POST /process</code>, <code>GET /</code></p>
+</body>
+</html>

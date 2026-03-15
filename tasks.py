@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import boto3
 import requests
@@ -227,6 +228,20 @@ def callback(url: str, token: str, payload: dict[str, Any]) -> None:
     response.raise_for_status()
 
 
+def is_http_url(path_or_url: str) -> bool:
+    parsed = urlparse(path_or_url)
+    return parsed.scheme in ("http", "https")
+
+
+def download_to_file(url: str, destination: Path) -> None:
+    with requests.get(url, stream=True, timeout=90) as response:
+        response.raise_for_status()
+        with destination.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 512):
+                if chunk:
+                    handle.write(chunk)
+
+
 def process_wallpaper(
     wallpaper_id: int,
     source_path: str,
@@ -235,14 +250,19 @@ def process_wallpaper(
     callback_token: str,
     thumbnail_source_path: str | None = None,
 ) -> None:
-    source = Path(source_path)
-    if not source.exists():
-        raise FileNotFoundError(f"source_path does not exist: {source_path}")
-
     temp_dir = Path(tempfile.mkdtemp(prefix=f"wallpaper_{wallpaper_id}_"))
     client = s3_client()
 
     try:
+        if is_http_url(source_path):
+            source_suffix = Path(urlparse(source_path).path).suffix.lower() or ".bin"
+            source = temp_dir / f"source{source_suffix}"
+            download_to_file(source_path, source)
+        else:
+            source = Path(source_path)
+            if not source.exists():
+                raise FileNotFoundError(f"source_path does not exist: {source_path}")
+
         source_is_video = is_video(source_mime_type, str(source))
         if source_is_video:
             source_height = video_height(str(source))
@@ -280,7 +300,14 @@ def process_wallpaper(
                 }
             )
 
-        thumbnail_source = Path(thumbnail_source_path) if thumbnail_source_path else source
+        if thumbnail_source_path and is_http_url(thumbnail_source_path):
+            thumb_suffix = Path(urlparse(thumbnail_source_path).path).suffix.lower() or ".jpg"
+            remote_thumb = temp_dir / f"thumbnail_source{thumb_suffix}"
+            download_to_file(thumbnail_source_path, remote_thumb)
+            thumbnail_source = remote_thumb
+        else:
+            thumbnail_source = Path(thumbnail_source_path) if thumbnail_source_path else source
+
         if source_is_video and not thumbnail_source_path:
             frame_path = temp_dir / "frame.jpg"
             extract_video_frame(str(source), str(frame_path))

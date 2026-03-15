@@ -1,12 +1,14 @@
 import os
+import logging
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -21,7 +23,34 @@ _server_started_at = time.time()
 _next_job_id = 1
 _active_jobs: dict[int, dict[str, str | int | float]] = {}
 _recent_jobs: list[dict[str, str | int | float]] = []
+_log_lines: deque[str] = deque(maxlen=max(200, int(os.getenv("STATUS_LOG_BUFFER", "800"))))
 _status_template_cache: str | None = None
+_logger = logging.getLogger("resolution_server")
+
+
+class _InMemoryLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+        except Exception:
+            message = record.getMessage()
+
+        with _state_lock:
+            _log_lines.appendleft(message)
+
+
+def _setup_log_capture() -> None:
+    root_logger = logging.getLogger()
+    if any(isinstance(handler, _InMemoryLogHandler) for handler in root_logger.handlers):
+        return
+
+    handler = _InMemoryLogHandler()
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"),
+    )
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
 
 
 def _utc_now() -> str:
@@ -107,6 +136,11 @@ def _status_snapshot() -> dict[str, object]:
     }
 
 
+def _logs_snapshot() -> list[str]:
+    with _state_lock:
+        return list(_log_lines)
+
+
 def _load_status_template() -> str:
     global _status_template_cache
     if _status_template_cache is not None:
@@ -120,8 +154,9 @@ def _load_status_template() -> str:
     return _status_template_cache
 
 
-def _render_status_page() -> str:
+def _render_status_page(default_tab: str = "jobs") -> str:
     status = _status_snapshot()
+    logs = _logs_snapshot()
     active_rows = ""
     for job in status["active_jobs"]:
         active_rows += (
@@ -151,6 +186,10 @@ def _render_status_page() -> str:
     if recent_rows == "":
         recent_rows = "<tr><td colspan='6'>No completed jobs yet.</td></tr>"
 
+    logs_text = "\n".join(escape(line) for line in logs)
+    if logs_text == "":
+        logs_text = "No logs captured yet."
+
     replacements = {
         "{{AS_OF}}": escape(str(status["as_of"])),
         "{{CURRENT_ACTIVITY}}": "Processing" if status["active_count"] > 0 else "Idle",
@@ -160,6 +199,8 @@ def _render_status_page() -> str:
         "{{UPTIME}}": escape(str(status["uptime_text"])),
         "{{ACTIVE_ROWS}}": active_rows,
         "{{RECENT_ROWS}}": recent_rows,
+        "{{LOG_LINES}}": logs_text,
+        "{{ACTIVE_TAB}}": "logs" if default_tab == "logs" else "jobs",
     }
 
     html = _load_status_template()
@@ -180,7 +221,12 @@ class ProcessRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def status_page() -> str:
-    return _render_status_page()
+    return _render_status_page(default_tab="jobs")
+
+
+@app.get("/logs", response_class=HTMLResponse)
+def logs_page() -> str:
+    return _render_status_page(default_tab="logs")
 
 
 @app.get("/health")
@@ -188,15 +234,42 @@ def health() -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.get("/logs.json")
+def logs() -> dict[str, object]:
+    lines = _logs_snapshot()
+    return {"as_of": _utc_now(), "count": len(lines), "lines": lines}
+
+
+@app.middleware("http")
+async def request_logger(request: Request, call_next):
+    started_at = time.time()
+    try:
+        response = await call_next(request)
+    except Exception:
+        _logger.exception("Unhandled request error %s %s", request.method, request.url.path)
+        raise
+
+    duration_ms = (time.time() - started_at) * 1000
+    _logger.info("%s %s -> %s (%.2fms)", request.method, request.url.path, response.status_code, duration_ms)
+    return response
+
+
 @app.post("/process")
 def process(request: ProcessRequest, x_resolution_request_token: str = Header(default="")) -> dict[str, bool]:
     expected = os.getenv("RESOLUTION_REQUEST_TOKEN", "")
     if expected == "" or expected != x_resolution_request_token:
+        _logger.warning("Unauthorized /process request for wallpaper_id=%s", request.wallpaper_id)
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     job_id = _register_job_start(
         wallpaper_id=request.wallpaper_id,
         source_path=request.source_path,
+    )
+    _logger.info(
+        "Started job_id=%s wallpaper_id=%s source=%s",
+        job_id,
+        request.wallpaper_id,
+        request.source_path,
     )
 
     try:
@@ -209,11 +282,23 @@ def process(request: ProcessRequest, x_resolution_request_token: str = Header(de
             thumbnail_source_path=request.thumbnail_source_path,
         )
         _register_job_done(job_id=job_id, status="success")
+        _logger.info("Finished job_id=%s wallpaper_id=%s status=success", job_id, request.wallpaper_id)
     except FileNotFoundError as exception:
         _register_job_done(job_id=job_id, status="failed", error=str(exception))
+        _logger.warning(
+            "Finished job_id=%s wallpaper_id=%s status=failed error=%s",
+            job_id,
+            request.wallpaper_id,
+            exception,
+        )
         raise HTTPException(status_code=422, detail=str(exception)) from exception
     except Exception as exception:
         _register_job_done(job_id=job_id, status="failed", error=str(exception))
+        _logger.exception("Finished job_id=%s wallpaper_id=%s status=failed", job_id, request.wallpaper_id)
         raise HTTPException(status_code=500, detail=str(exception)) from exception
 
     return {"queued": True}
+
+
+_setup_log_capture()
+_logger.info("Resolution server started")

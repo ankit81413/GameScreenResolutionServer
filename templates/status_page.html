@@ -8,6 +8,11 @@
     body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
     h1 { margin-bottom: 8px; }
     .meta { color: #555; margin-bottom: 20px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab-button { border: 1px solid #ccc; background: #f7f7f7; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+    .tab-button.active { background: #111; color: #fff; border-color: #111; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
     .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
     .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; min-width: 160px; }
     .label { color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -15,6 +20,7 @@
     table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
     th { background: #f7f7f7; }
+    .log-box { border: 1px solid #ddd; border-radius: 8px; background: #0e0e0e; color: #d2f5d2; font-family: Consolas, monospace; font-size: 12px; line-height: 1.35; padding: 12px; max-height: 70vh; overflow: auto; white-space: pre-wrap; }
     code { background: #f2f2f2; padding: 2px 4px; border-radius: 4px; }
   </style>
 </head>
@@ -32,35 +38,64 @@
     <div class="card"><div class="label">Uptime</div><div class="value">{{UPTIME}}</div></div>
   </div>
 
-  <h2>Active Jobs</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Job ID</th>
-        <th>Wallpaper ID</th>
-        <th>Started</th>
-        <th>Elapsed</th>
-        <th>Source Path</th>
-      </tr>
-    </thead>
-    <tbody>{{ACTIVE_ROWS}}</tbody>
-  </table>
+  <div class="tabs">
+    <a class="tab-button active" href="/" data-tab="jobs">Jobs</a>
+    <a class="tab-button" href="/logs" data-tab="logs">Logs</a>
+  </div>
 
-  <h2>Recent Jobs (Latest 20)</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Job ID</th>
-        <th>Wallpaper ID</th>
-        <th>Status</th>
-        <th>Duration</th>
-        <th>Finished</th>
-        <th>Error</th>
-      </tr>
-    </thead>
-    <tbody>{{RECENT_ROWS}}</tbody>
-  </table>
+  <div class="tab-pane active" id="tab-jobs">
+    <h2>Active Jobs</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Job ID</th>
+          <th>Wallpaper ID</th>
+          <th>Started</th>
+          <th>Elapsed</th>
+          <th>Source Path</th>
+        </tr>
+      </thead>
+      <tbody>{{ACTIVE_ROWS}}</tbody>
+    </table>
 
-  <p>API endpoints: <code>GET /health</code>, <code>POST /process</code>, <code>GET /</code></p>
+    <h2>Recent Jobs (Latest 20)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Job ID</th>
+          <th>Wallpaper ID</th>
+          <th>Status</th>
+          <th>Duration</th>
+          <th>Finished</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>{{RECENT_ROWS}}</tbody>
+    </table>
+  </div>
+
+  <div class="tab-pane" id="tab-logs">
+    <h2>Application Logs (Recent)</h2>
+    <div class="log-box">{{LOG_LINES}}</div>
+  </div>
+
+  <p>API endpoints: <code>GET /health</code>, <code>POST /process</code>, <code>GET /</code>, <code>GET /logs</code>, <code>GET /logs.json</code></p>
+
+  <script>
+    const buttons = document.querySelectorAll(".tab-button");
+    const panes = {
+      jobs: document.getElementById("tab-jobs"),
+      logs: document.getElementById("tab-logs")
+    };
+
+    function activateTab(tab) {
+      const safeTab = panes[tab] ? tab : "jobs";
+      buttons.forEach((item) => item.classList.toggle("active", item.getAttribute("data-tab") === safeTab));
+      Object.keys(panes).forEach((key) => panes[key].classList.toggle("active", key === safeTab));
+    }
+
+    const initialTab = "{{ACTIVE_TAB}}" || "jobs";
+    activateTab(initialTab);
+  </script>
 </body>
 </html>

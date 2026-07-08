@@ -9,6 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -17,7 +18,26 @@ from tasks import process_wallpaper
 
 load_dotenv()
 
+
+def _cors_origins() -> list[str]:
+    configured = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    if configured.strip():
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+    return [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+    ]
+
+
 app = FastAPI(title="GameScreen Resolution Server")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Resolution-Request-Token"],
+)
 _state_lock = threading.Lock()
 _server_started_at = time.time()
 _next_job_id = 1
